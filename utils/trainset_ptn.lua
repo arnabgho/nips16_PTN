@@ -1,6 +1,7 @@
 -- code adapted from https://github.com/soumith/dcgan.torch.git
 require 'image'
-require 'mattorch'
+--require 'mattorch'
+matio=require 'matio'
 dir = require 'pl.dir'
 
 dataLoader = {}
@@ -60,8 +61,11 @@ function dataLoader:sample(quantity)
     end
    
     local vox_path = opt.data_vox_path .. '/' .. cls_files[file_idx]
-    local vox_loader = mattorch.load(string.format('%s/model_%d.mat', vox_path, opt.vox_size))
-    local vox_instance = vox_loader.voxel
+    --local vox_loader = mattorch.load(string.format('%s/model_%d.mat', vox_path, opt.vox_size))
+    --local vox_loader = matio.load(string.format('%s/model_%d.mat', vox_path, opt.vox_size))
+    --local vox_instance = vox_loader.voxel
+    local vox_loader = matio.load(string.format('%s/model_%d.mat', vox_path, opt.vox_size),'voxel')
+    local vox_instance = vox_loader
     batch_vox[n]:copy(vox_instance)
   end
 

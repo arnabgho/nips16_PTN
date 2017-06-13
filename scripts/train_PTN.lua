@@ -6,7 +6,7 @@ require 'ptn'
 require 'nngraph'
 require 'optim'
 require 'image'
-require 'mattorch'
+--require 'mattorch'
 
 model_utils = require 'utils.model_utils'
 optim_utils = require 'utils.adam_v2'
@@ -19,7 +19,7 @@ opt = lapp[[
   --data_view_path    (default 'data/shapenetcore_viewdata')
   --data_vox_path     (default 'data/shapenetcore_voxdata')
   --dataset           (default 'dataset_ptn')
-  --gpu               (default 0)
+  --gpu               (default 1)
   --use_cudnn         (default 1)
   --nz                (default 512)
   --na                (default 3)
