@@ -1,13 +1,13 @@
 local PTN = {}
 
 function PTN.create(opt)
-  local encoder = PTN.create_encoder(opt)
+  local encoder = PTN.create_viewpoint_id_encoder(opt)
   local voxel_dec = PTN.create_voxel_dec(opt)
   local projector = PTN.create_projector(opt)
   return encoder, voxel_dec, projector
 end
 
-function rotatorRNN.create_encoder(opt)
+function rotatorRNN.create_head_viewpoint_id_encoder(opt)
   local encoder = nn.Sequential()
   -- 64 x 64 x 3 --> 32 x 32 x 64
   encoder:add(nn.SpatialConvolution(3, 64, 5, 5, 2, 2, 2, 2))
@@ -44,8 +44,45 @@ function rotatorRNN.create_encoder(opt)
   return encoder
 end
 
+function rotatorRNN.create_viewpoint_oblivious_encoder(opt)
+  local encoder = nn.Sequential()
+  -- 64 x 64 x 3 --> 32 x 32 x 64
+  encoder:add(nn.SpatialConvolution(3, 64, 5, 5, 2, 2, 2, 2))
+  encoder:add(nn.ReLU())
 
-function PTN.create_alt_encoder(opt)
+  -- 32 x 32 x 64 --> 16 x 16 x 128
+  encoder:add(nn.SpatialConvolution(64, 128, 5, 5, 2, 2, 2, 2))
+  encoder:add(nn.ReLU())
+  
+  -- 16 x 16 x 128 --> 8 x 8 x 256
+  encoder:add(nn.SpatialConvolution(128, 256, 5, 5, 2, 2, 2, 2))
+  encoder:add(nn.ReLU())
+  
+  -- 8 x 8 x 256 --> 1024
+  encoder:add(nn.Reshape(8*8*256))
+  encoder:add(nn.Linear(8*8*256, 1024))
+  encoder:add(nn.ReLU())
+
+  -- 1024 --> 1024
+  encoder:add(nn.Linear(1024, 1024))
+  encoder:add(nn.ReLU())
+
+  -- identity unit
+  local eid = nn.Sequential()
+  eid:add(nn.Linear(1024, opt.nz))
+  eid:add(nn.ReLU())
+
+  ---- viewpoint unit
+  --local erot = nn.Sequential()
+  --erot:add(nn.Linear(1024, opt.ncam))
+  --erot:add(nn.ReLU())
+
+  encoder:add(eid)
+  return encoder
+end
+
+
+function PTN.create_viewpoint_in_encoder(opt)
 	local encoder = nn.Sequential()
 	local img_encoder=nn.Sequential()
 	-- 64 x 64 x 3 --> 32 x 32 x 64
@@ -112,7 +149,7 @@ function PTN.create_voxel_dec(opt)
   voxel_dec:add(nn.VolumetricFullConvolution(256, 96, 5, 5, 5, 2, 2, 2, 0, 0, 0))
   voxel_dec:add(nn.ReLU())
   -- 96 x 15 x 15 x 15 --> 1 x 32 x 32 x 32
-  voxel_dec:add(nn.VolumetricFullConvolution(96, 1, 6, 6, 6, 2, 2, 2, 1, 1, 1))
+  voxel_dec:add(nn.VolumetricFullConvolution(96, 3, 6, 6, 6, 2, 2, 2, 1, 1, 1))
   voxel_dec:add(nn.Sigmoid())
 
   return voxel_dec

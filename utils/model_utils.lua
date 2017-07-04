@@ -5,16 +5,19 @@
 -- why it is kind of a large
 
 require 'torch'
+local unpack=unpack or table.unpack
 local model_utils = {}
-function model_utils.combine_all_parameters(...)
+--function model_utils.combine_all_parameters(...)
     --[[ like module:getParameters, but operates on many modules ]]--
 
+function model_utils.combine_all_parameters(networks)
     -- get parameters
-    local networks = {...}
+    --local networks = ...
     local parameters = {}
     local gradParameters = {}
-    for i = 1, #networks do
-        local net_params, net_grads = networks[i]:parameters()
+    --for i = 1, #networks do
+    for k,network in pairs(networks) do
+        local net_params, net_grads = network:parameters()
 
         if net_params then
             for _, p in pairs(net_params) do

@@ -95,10 +95,11 @@ opt.model_name = string.format('%s_%s_nv%d_adam%d_bs%d_nz%d_wd%g_lbg(%g,%g)_ks%d
 
 -- initialize parameters
 init_models = dofile('scripts/' .. opt.arch_name .. '.lua')
-encoder, voxel_dec, projector = init_models.create(opt)
-encoder:apply(weights_init)
-voxel_dec:apply(weights_init)
-projector:apply(weights_init)
+model = {}
+model.encoder, model.voxel_dec, model.projector = init_models.create(opt)
+model.encoder:apply(weights_init)
+model.voxel_dec:apply(weights_init)
+model.projector:apply(weights_init)
 
 opt.model_path = opt.checkpoint_dir .. opt.model_name
 if not paths.dirp(opt.model_path) then
@@ -137,9 +138,9 @@ end
 
 -- build nngraph
 if prev_iter > 0 then
-  encoder = loader.encoder
-  voxel_dec = loader.voxel_dec
-  projector = loader.projector
+  model.encoder = loader.encoder
+  model.voxel_dec = loader.voxel_dec
+  model.projector = loader.projector
 end
 
 -- criterion
@@ -204,9 +205,11 @@ if opt.gpu > 0 then
   criterion_viewpoints:cuda()
 end
 
-params, grads = voxel_dec:getParameters()
-paramEnc, gradEnc = encoder:getParameters()
-paramProj, gradProj = projector:getParameters()
+--params, grads = voxel_dec:getParameters()
+--paramEnc, gradEnc = encoder:getParameters()
+--paramProj, gradProj = projector:getParameters()
+
+params,grads=model_utils.combine_all_parameters(model)
 
 -- perspective projection
 --------------------------------------------------
@@ -261,8 +264,6 @@ local opfunc = function(x)
     params:copy(x)
   end
   grads:zero()
-  gradEnc:zero()
-  gradProj:zero() 
   -- train
   data_tm:reset(); data_tm:resume()
   cur_train_ims, cur_train_vox, _ = data:getBatch()
@@ -276,20 +277,20 @@ local opfunc = function(x)
     end
   end
 
-  local f_id = encoder:forward(batch_im_in)[1]:clone()
+  local f_id = model.encoder:forward(batch_im_in)[1]:clone()
   for m = 1, opt.batch_size do
     for k = 1, opt.kstep do
       batch_feat[(m-1)*opt.kstep+k]:copy(f_id[m])
     end
   end
   
-  batch_feat,batch_viewpoints=encoder:forward(batch_im_in)
+  batch_feat,batch_viewpoints=model.encoder:forward(batch_im_in)
   local errViewpoint= criterion_viewpoints:forward(batch_viewpoints,batch_trans:reshape(opt.batch_size,opt.ncam))
   local d_encoder_viewpoints= criterion_viewpoints:backward(batch_viewpoints,batch_trans:reshape(opt.batch_size,opt.ncam)):mul(opt.lambda_viewpoint)  
   batch_proj = projector:forward({batch_vox, batch_trans}):clone()
 
-  local f_vox = voxel_dec:forward(batch_feat)
-  local f_proj = projector:forward({f_vox, batch_trans})
+  local f_vox = model.voxel_dec:forward(batch_feat)
+  local f_proj = model.projector:forward({f_vox, batch_trans})
  
   errVOX = criterion_vox:forward(f_vox, batch_vox) 
   local df_dVOX = criterion_vox:backward(f_vox, batch_vox):mul(opt.lambda_vox)
@@ -297,9 +298,9 @@ local opfunc = function(x)
   errMSK = criterion_msk:forward(f_proj, batch_proj) 
   local df_dMSK = criterion_msk:backward(f_proj, batch_proj):mul(opt.lambda_msk)
 
-  local df_dproj = projector:backward({f_vox, batch_trans}, df_dMSK)
-  local df_dvox = voxel_dec:backward(batch_feat, df_dproj[1]:clone() + df_dVOX:clone())
-  local df_d_im_in=encoder:backward({df_dvox,d_encoder_viewpoints}) 
+  local df_dproj = model.projector:backward({f_vox, batch_trans}, df_dMSK)
+  local df_dvox = model,voxel_dec:backward(batch_feat, df_dproj[1]:clone() + df_dVOX:clone())
+  local df_d_im_in=model.encoder:backward({df_dvox,d_encoder_viewpoints}) 
  
   local err = errVOX * opt.lambda_vox + errMSK * opt.lambda_msk + errViewpoint * opt.lambda_viewpoint
 
@@ -375,8 +376,9 @@ for epoch = prev_iter + 1, opt.niter do
   epoch_tm:reset()
   local counter = 0
   -- train
-  voxel_dec:training()
-  projector:training()
+  model.encoder:training()
+  model.voxel_dec:training()
+  model.projector:training()
 
   for i = 1, math.min(data:size() / (opt.batch_size), opt.ntrain) do
     tm:reset()
@@ -390,8 +392,9 @@ for epoch = prev_iter + 1, opt.niter do
   end
 
   -- val
-  voxel_dec:evaluate()
-  projector:evaluate()
+  model.encoder:evaluate()
+  model.voxel_dec:evaluate()
+  model.projector:evaluate()
 
   --for i = 1, 1 do
   tm:reset()
