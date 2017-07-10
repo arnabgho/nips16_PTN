@@ -15,7 +15,7 @@ for cat in io.lines('exp_' .. opt.exp_list .. '.txt') do
   categories[#categories + 1] = cat
   local dirpath = opt.data_root .. '/' .. cat
 
-  local list = opt.data_id_path .. '/' .. cat .. '_trainids.txt'
+  local list = opt.data_id_path .. '/' .. cat .. '_valids.txt'
   cls_files = {}
   for line in io.lines(list) do
     cls_files[#cls_files + 1] = line
@@ -45,7 +45,7 @@ function dataLoader:sample(quantity)
   for n = 1, quantity do
     batch_ims[n] = torch.Tensor(opt.nview, 3, load_size[2], load_size[2])
   end
-  local batch_vox = torch.Tensor(quantity, 1, opt.vox_size, opt.vox_size, opt.vox_size)
+  local batch_vox = torch.Tensor(quantity, 3, opt.vox_size, opt.vox_size, opt.vox_size)
 
   for n = 1, quantity do
     local cls_files 
@@ -62,7 +62,6 @@ function dataLoader:sample(quantity)
    
     local vox_path = opt.data_vox_path .. '/' .. cls_files[file_idx]
     --local vox_loader = mattorch.load(string.format('%s/model_%d.mat', vox_path, opt.vox_size))
-    --local vox_loader = matio.load(string.format('%s/model_%d.mat', vox_path, opt.vox_size))
     --local vox_instance = vox_loader.voxel
     local vox_loader = matio.load(string.format('%s/model_%d.mat', vox_path, opt.vox_size),'voxel')
     local vox_instance = vox_loader

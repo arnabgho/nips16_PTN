@@ -1,13 +1,13 @@
 local PTN = {}
 
 function PTN.create(opt)
-  local encoder = PTN.create_viewpoint_id_encoder(opt)
+  local encoder = PTN.create_head_viewpoint_id_encoder(opt)
   local voxel_dec = PTN.create_voxel_dec(opt)
   local projector = PTN.create_projector(opt)
   return encoder, voxel_dec, projector
 end
 
-function rotatorRNN.create_head_viewpoint_id_encoder(opt)
+function PTN.create_head_viewpoint_id_encoder(opt)
   local encoder = nn.Sequential()
   -- 64 x 64 x 3 --> 32 x 32 x 64
   encoder:add(nn.SpatialConvolution(3, 64, 5, 5, 2, 2, 2, 2))
@@ -44,7 +44,7 @@ function rotatorRNN.create_head_viewpoint_id_encoder(opt)
   return encoder
 end
 
-function rotatorRNN.create_viewpoint_oblivious_encoder(opt)
+function PTN.create_viewpoint_oblivious_encoder(opt)
   local encoder = nn.Sequential()
   -- 64 x 64 x 3 --> 32 x 32 x 64
   encoder:add(nn.SpatialConvolution(3, 64, 5, 5, 2, 2, 2, 2))

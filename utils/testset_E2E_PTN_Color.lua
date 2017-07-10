@@ -1,10 +1,10 @@
 -- code adapted from https://github.com/soumith/dcgan.torch.git
 require 'image'
---require 'mattorch'
-matio=require 'matio'
+require 'mattorch'
 dir = require 'pl.dir'
 
 dataLoader = {}
+dataLoader.counter = 0
 
 local categories = {}
 local files = {}
@@ -15,7 +15,7 @@ for cat in io.lines('exp_' .. opt.exp_list .. '.txt') do
   categories[#categories + 1] = cat
   local dirpath = opt.data_root .. '/' .. cat
 
-  local list = opt.data_id_path .. '/' .. cat .. '_trainids.txt'
+  local list = opt.data_id_path .. '/' .. cat .. '_testids.txt'
   cls_files = {}
   for line in io.lines(list) do
     cls_files[#cls_files + 1] = line
@@ -45,14 +45,14 @@ function dataLoader:sample(quantity)
   for n = 1, quantity do
     batch_ims[n] = torch.Tensor(opt.nview, 3, load_size[2], load_size[2])
   end
-  local batch_vox = torch.Tensor(quantity, 1, opt.vox_size, opt.vox_size, opt.vox_size)
+  local batch_vox = torch.Tensor(quantity, 3, opt.vox_size, opt.vox_size, opt.vox_size)
 
   for n = 1, quantity do
     local cls_files 
 
     cls_files = files[class_idx_batch[n]]
 
-    local file_idx = torch.randperm(#cls_files)[1]
+    local file_idx = self.counter + n
 
     local obj_list = opt.data_view_path .. '/' .. cls_files[file_idx]
     for k = 1, opt.nview do
@@ -61,13 +61,12 @@ function dataLoader:sample(quantity)
     end
    
     local vox_path = opt.data_vox_path .. '/' .. cls_files[file_idx]
-    --local vox_loader = mattorch.load(string.format('%s/model_%d.mat', vox_path, opt.vox_size))
-    --local vox_loader = matio.load(string.format('%s/model_%d.mat', vox_path, opt.vox_size))
-    --local vox_instance = vox_loader.voxel
-    local vox_loader = matio.load(string.format('%s/model_%d.mat', vox_path, opt.vox_size),'voxel')
-    local vox_instance = vox_loader
+    local vox_loader = mattorch.load(string.format('%s/model_%d.mat', vox_path, opt.vox_size))
+    local vox_instance = vox_loader.voxel
     batch_vox[n]:copy(vox_instance)
   end
+
+  self.counter = self.counter + quantity
 
   collectgarbage()
 

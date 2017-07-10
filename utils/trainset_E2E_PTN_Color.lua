@@ -45,7 +45,7 @@ function dataLoader:sample(quantity)
   for n = 1, quantity do
     batch_ims[n] = torch.Tensor(opt.nview, 3, load_size[2], load_size[2])
   end
-  local batch_vox = torch.Tensor(quantity, 1, opt.vox_size, opt.vox_size, opt.vox_size)
+  local batch_vox = torch.Tensor(quantity, 3, opt.vox_size, opt.vox_size, opt.vox_size)
 
   for n = 1, quantity do
     local cls_files 
