@@ -1,7 +1,7 @@
 -- code adapted from https://github.com/soumith/dcgan.torch.git
 require 'image'
 --require 'mattorch'
-require 'matio'
+matio=require 'matio'
 dir = require 'pl.dir'
 
 dataLoader = {}

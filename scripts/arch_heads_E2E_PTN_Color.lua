@@ -157,11 +157,18 @@ function PTN.create_voxel_dec(opt)
   voxel_dec:add(nn.VolumetricFullConvolution(256, 96, 5, 5, 5, 2, 2, 2, 0, 0, 0))
   voxel_dec:add(nn.ReLU())
   -- 96 x 15 x 15 x 15 --> 3 x 32 x 32 x 32
-  voxel_dec:add(nn.VolumetricFullConvolution(96, 3, 6, 6, 6, 2, 2, 2, 1, 1, 1))
-  voxel_dec:add(nn.Sigmoid())
+  local color_head=nn.Sequential()
+  color_head:add(nn.VolumetricFullConvolution(96, 3, 6, 6, 6, 2, 2, 2, 1, 1, 1))
+  color_head:add(nn.Sigmoid())
 
+  local occupancy_head=nn.Sequential()
+  occupancy_head:add(nn.VolumetricFullConvolution(96, 1, 6, 6, 6, 2, 2, 2, 1, 1, 1))
+  occupancy_head:add(nn.Sigmoid())
+
+  voxel_dec:add(nn.ConcatTable():add(color_head):add(occupancy_head))
   return voxel_dec
 end
+
 
 function PTN.create_voxel_dec_occupancy(opt)
   local voxel_dec = nn.Sequential()

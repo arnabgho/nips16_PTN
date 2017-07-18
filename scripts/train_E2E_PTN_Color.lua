@@ -1,11 +1,12 @@
 require 'torch'
 require 'nn'
 require 'cunn'
---require 'cudnn'
+require 'cudnn'
 require 'ptn'
 require 'nngraph'
 require 'optim'
 require 'image'
+matio=require 'matio'
 --require 'mattorch'
 
 model_utils = require 'utils.model_utils'
@@ -39,7 +40,8 @@ opt= lapp[[
   --exp_list          (default 'singleclass')
   --load_size         (default 64)
   --vox_size          (default 32)
-  --ncam              (default 16)	
+  --ncam              (default 16)
+  --encoder_type      (default 'pretrained')
 ]]
 
 opt.focal_length = math.sqrt(3)/2
@@ -89,18 +91,25 @@ local function weights_init(m)
   end
 end
 
-opt.model_name = string.format('%s_%s_nv%d_adam%d_bs%d_nz%d_wd%g_lbg(%g,%g)_ks%d_vs%d', 
-  opt.arch_name, opt.exp_list, opt.nview, opt.adam, opt.batch_size, opt.nz,
+opt.model_name = string.format('%s_%s_%s_nv%d_adam%d_bs%d_nz%d_wd%g_lbg(%g,%g)_ks%d_vs%d', 
+  opt.encoder_type,opt.arch_name, opt.exp_list, opt.nview, opt.adam, opt.batch_size, opt.nz,
   opt.weight_decay, opt.lambda_msk, opt.lambda_vox, opt.kstep, opt.vox_size)
 
 -- initialize parameters
 init_models = dofile('scripts/' .. opt.arch_name .. '.lua')
 model = {}
-model.encoder, model.voxel_dec, model.projector = init_models.create(opt)
-model.encoder:apply(weights_init)
+local projector=nil
+model.encoder, model.voxel_dec, projector = init_models.create(opt)
+if opt.encoder_type=='pretrained' then
+    base_loader=torch.load(opt.checkpoint_dir .. 'cnn_vol.t7')
+    model.encoder=base_loader.encoder
+else
+    model.encoder:apply(weights_init)
+end
 model.voxel_dec:apply(weights_init)
-model.projector:apply(weights_init)
+projector:apply(weights_init)
 
+print(model.encoder)
 opt.model_path = opt.checkpoint_dir .. opt.model_name
 if not paths.dirp(opt.model_path) then
   paths.mkdir(opt.model_path)
@@ -140,7 +149,7 @@ end
 if prev_iter > 0 then
   model.encoder = loader.encoder
   model.voxel_dec = loader.voxel_dec
-  model.projector = loader.projector
+  projector = loader.projector
 end
 
 -- criterion
@@ -183,6 +192,8 @@ local batch_trans = torch.Tensor(opt.batch_size * opt.kstep, 4, 4)
 local tmp_gt_im = torch.Tensor(opt.batch_size, 3, opt.load_size, opt.load_size)
 local tmp_pred_proj = torch.Tensor(opt.batch_size, 3, opt.vox_size, opt.vox_size)
 local tmp_gt_proj = torch.Tensor(opt.batch_size, 3, opt.vox_size, opt.vox_size)
+local tmp_pred_vox = torch.Tensor(opt.batch_size,3,opt.vox_size,opt.vox_size,opt.vox_size)
+local tmp_gt_vox = torch.Tensor(opt.batch_size,3,opt.vox_size,opt.vox_size,opt.vox_size)
 
 local errVOX, errMSK, errViewpoint
 local epoch_tm = torch.Timer()
@@ -199,7 +210,7 @@ if opt.gpu > 0 then
   batch_trans = batch_trans:cuda()
   model.encoder:cuda()
   model.voxel_dec:cuda()
-  model.projector:cuda()
+  projector:cuda()
   criterion_vox:cuda()
   criterion_msk:cuda()
   criterion_viewpoints:cuda()
@@ -277,33 +288,48 @@ local opfunc = function(x)
     end
   end
 
-  local f_id = model.encoder:forward(batch_im_in)[1]:clone()
-  for m = 1, opt.batch_size do
-    for k = 1, opt.kstep do
-      batch_feat[(m-1)*opt.kstep+k]:copy(f_id[m])
-    end
+  --local f_id = model.encoder:forward(batch_im_in)[1]:clone()
+  --for m = 1, opt.batch_size do
+  --  for k = 1, opt.kstep do
+  --    batch_feat[(m-1)*opt.kstep+k]:copy(f_id[m])
+  --  end
+  --end
+
+  local d_encoder_viewpoints=nil
+  local errViewpoint=0
+  if opt.encoder_type=='viewpoint_regress' then
+      local encoded=model.encoder:forward(batch_im_in) 
+      batch_feat=encoded[1]
+      batch_viewpoints=encoded[2]
+      errViewpoint= criterion_viewpoints:forward(batch_viewpoints,batch_trans:reshape(opt.batch_size*opt.kstep,opt.ncam))
+      d_encoder_viewpoints= criterion_viewpoints:backward(batch_viewpoints,batch_trans:reshape(opt.batch_size*opt.kstep,opt.ncam)):mul(opt.lambda_viewpoint) 
+  elseif opt.encoder_type=='viewpoint_input' then
+      batch_feat=model.encoder:forward({batch_im_in,batch_trans:reshape(opt.batch_size*opt.kstep,opt.ncam,1,1)} )
+  elseif opt.encoder_type=='viewpoint_oblivious' then
+      batch_feat=model.encoder:forward(batch_im_in)
+  elseif opt.encoder_type=='pretrained' then
+      batch_feat=model.encoder:forward(batch_im_in)[1]
   end
- 
-  local encoded=model.encoder:forward(batch_im_in) 
-  batch_feat=encoded[1]
-  batch_viewpoints=encoded[2]
-  local errViewpoint= criterion_viewpoints:forward(batch_viewpoints,batch_trans:reshape(opt.batch_size*opt.kstep,opt.ncam))
-  local d_encoder_viewpoints= criterion_viewpoints:backward(batch_viewpoints,batch_trans:reshape(opt.batch_size*opt.kstep,opt.ncam)):mul(opt.lambda_viewpoint)  
-  batch_proj = model.projector:forward({batch_vox, batch_trans}):clone()
+  batch_proj = projector:forward({batch_vox, batch_trans}):clone()
 
   local f_vox = model.voxel_dec:forward(batch_feat)
-  local f_proj = model.projector:forward({f_vox, batch_trans})
+  local f_proj = projector:forward({f_vox, batch_trans})
  
   errVOX = criterion_vox:forward(f_vox, batch_vox) 
   local df_dVOX = criterion_vox:backward(f_vox, batch_vox):mul(opt.lambda_vox)
-  
   errMSK = criterion_msk:forward(f_proj, batch_proj) 
   local df_dMSK = criterion_msk:backward(f_proj, batch_proj):mul(opt.lambda_msk)
 
-  local df_dproj = model.projector:backward({f_vox, batch_trans}, df_dMSK)
+  local df_dproj = projector:backward({f_vox, batch_trans}, df_dMSK)
   local df_dvox = model.voxel_dec:backward(batch_feat, df_dproj[1]:clone() + df_dVOX:clone())
-  local df_d_im_in=model.encoder:backward(batch_im_in,{df_dvox,d_encoder_viewpoints}) 
- 
+  
+  if opt.encoder_type=='viewpoint_regress' then
+    local df_d_im_in=model.encoder:backward(batch_im_in,{df_dvox,d_encoder_viewpoints}) 
+  elseif opt.encoder_type=='viewpoint_input' then
+    local df_d_im_in=model.encoder:backward({batch_im_in,batch_trans:reshape(opt.batch_size*opt.kstep,opt.ncam,1,1)},df_dvox) 
+  elseif opt.encoder_type=='viewpoint_oblivious' then
+    local df_d_im_in=model.encoder:backward(batch_im_in,df_dvox)  
+  end
   local err = errVOX * opt.lambda_vox + errMSK * opt.lambda_msk + errViewpoint * opt.lambda_viewpoint
 
   return err, grads
@@ -331,21 +357,33 @@ local feedforward = function(x)
     end
   end
 
-  local f_id = model.encoder:forward(batch_im_in)[1]:clone()
-  for m = 1, opt.batch_size do
-    for k = 1, opt.kstep do
-      batch_feat[(m-1)*opt.kstep+k]:copy(f_id[m])
-    end
+  --local f_id = model.encoder:forward(batch_im_in)[1]:clone()
+  --for m = 1, opt.batch_size do
+  --  for k = 1, opt.kstep do
+  --    batch_feat[(m-1)*opt.kstep+k]:copy(f_id[m])
+  --  end
+  --end
+
+
+  local errViewpoint=0
+  if opt.encoder_type=='viewpoint_regress' then
+      local encoded=model.encoder:forward(batch_im_in) 
+      batch_feat=encoded[1]
+      batch_viewpoints=encoded[2]
+      errViewpoint= criterion_viewpoints:forward(batch_viewpoints,batch_trans:reshape(opt.batch_size*opt.kstep,opt.ncam))
+  elseif opt.encoder_type=='viewpoint_input' then
+      batch_feat=model.encoder:forward({batch_im_in,batch_trans:reshape(opt.batch_size*opt.kstep,opt.ncam,1,1)} )
+  elseif opt.encoder_type=='viewpoint_oblivious' then
+      batch_feat=model.encoder:forward(batch_im_in)
+  elseif opt.encoder_type=='pretrained' then
+      batch_feat=model.encoder:forward(batch_im_in)[1]
   end
- 
-  local encoded=model.encoder:forward(batch_im_in) 
-  batch_feat=encoded[1]
-  batch_viewpoints=encoded[2]
-  local errViewpoint= criterion_viewpoints:forward(batch_viewpoints,batch_trans:reshape(opt.batch_size*opt.kstep,opt.ncam))
-  batch_proj = model.projector:forward({batch_vox, batch_trans}):clone()
+
+
+  batch_proj = projector:forward({batch_vox, batch_trans}):clone()
 
   local f_vox = model.voxel_dec:forward(batch_feat)
-  local f_proj = model.projector:forward({f_vox, batch_trans})
+  local f_proj = projector:forward({f_vox, batch_trans})
  
   errVOX = criterion_vox:forward(f_vox, batch_vox) 
   
@@ -354,6 +392,8 @@ local feedforward = function(x)
     k = torch.random(opt.kstep)
     tmp_gt_im[m] = batch_im_in[(m-1)*opt.kstep+k]:float():clone()
     tmp_pred_proj[m] = f_proj[(m-1)*opt.kstep+k]:float():clone()
+    tmp_pred_vox[m] = f_vox[(m-1)*opt.kstep+k]:float():clone()
+    tmp_gt_vox[m]= cur_vox[m]:float():clone()
     tmp_gt_proj[m] = batch_proj[(m-1)*opt.kstep+k]:float():clone()
   end
 
@@ -369,9 +409,9 @@ for epoch = prev_iter + 1, opt.niter do
   -- train
   model.encoder:training()
   model.voxel_dec:training()
-  model.projector:training()
+  projector:training()
 
-  for i = 1, math.min(data:size() / (opt.batch_size), opt.ntrain) do
+  for i = 1, math.max(1,math.min(data:size() / (opt.batch_size), opt.ntrain)) do
     tm:reset()
     optim_utils.adam_v2(opfunc, params, config, state)
     counter = counter + 1
@@ -385,7 +425,7 @@ for epoch = prev_iter + 1, opt.niter do
   -- val
   model.encoder:evaluate()
   model.voxel_dec:evaluate()
-  model.projector:evaluate()
+  projector:evaluate()
 
   --for i = 1, 1 do
   tm:reset()
@@ -424,10 +464,17 @@ for epoch = prev_iter + 1, opt.niter do
 
   formatted = formatted:byte()
   image.save(opt.model_path .. string.format('/sample-%03d.jpg', epoch), formatted)
+  
+  local vox_dir=opt.model_path .. string.format('/vox_%03d',epoch)
+  paths.mkdir(vox_dir)
+  for i=1,opt.batch_size do
+      matio.save(vox_dir .. string.format('/gt_%03d.mat',i),tmp_gt_vox[i])
+      matio.save(vox_dir ..  string.format('/pred_%03d.mat',i),tmp_pred_vox[i])
+  end
 
   if epoch % opt.save_every == 0 then
     torch.save((opt.model_path .. string.format('/net-epoch-%d.t7', epoch)), 
-      {encoder = model.encoder, voxel_dec = model.voxel_dec, projector = model.projector})
+      {encoder = model.encoder, voxel_dec = model.voxel_dec, projector = projector})
     torch.save((opt.model_path .. '/state.t7'), state)
   end
 end

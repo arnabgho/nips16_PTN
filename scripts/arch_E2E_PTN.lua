@@ -9,7 +9,7 @@ function PTN.create(opt)
   elseif opt.encoder_type=='viewpoint_oblivious' then
     encoder=PTN.create_encoder_viewpoint_oblivious(opt)  
   end
-  local voxel_dec = PTN.create_voxel_dec(opt)
+  local voxel_dec = PTN.create_voxel_dec_occupancy(opt)
   local projector = PTN.create_projector(opt)
   return encoder, voxel_dec, projector
 end
@@ -162,7 +162,6 @@ function PTN.create_voxel_dec(opt)
 
   return voxel_dec
 end
-
 function PTN.create_voxel_dec_occupancy(opt)
   local voxel_dec = nn.Sequential()
   
